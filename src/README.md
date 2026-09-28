@@ -37,6 +37,11 @@ src/
     permissionDecision.ts  classifier questions, shared request and response validation
     autoAllowPolicy.ts  chooses always (edits only) or once for a safe verdict
     notificationText.ts  notify-send argument building
+    permissionAudit.ts  permission decision audit lines
+    permissionHandlingCounts.ts  process-wide tally behind the status bar auto segment
+    reasoningLoopAudit.ts  doom-loop audit lines for every Jev spiral check
+    windowActivation.ts  KDE window focus from a notification click
+    logRotation.ts  thirty-day retention shared by both audit logs
     requestDeadline.ts  shared client request deadline
 ```
 
@@ -171,11 +176,23 @@ an answer reach this flow.
 - A desktop action replies `once` or `always`. An `always` reply saves a
   permission rule, the same as the TUI prompt's always option. A user reply
   in the TUI cancels the classifier request and closes the notification.
+- On KDE, the notification also carries a **Go to window** action. The
+  freedesktop protocol has no "activate window" concept and `notify-send`
+  has no window of its own, so the action loads a throwaway KWin script over
+  D-Bus that raises the compositor window owned by the terminal's process
+  chain. It raises the terminal and answers nothing; the OpenCode prompt
+  stays open. The path is best-effort: a non-KDE session never sees the
+  action, and a failed activation logs `PermissionWindowActivationFailed`
+  with the prompt untouched.
 - The assistant sends permission patterns. It does not send the session
   transcript or project path. Jev sees the command text only: for a custom
   script the agent wants to run, it judges the invocation, not what the
-  script body does. Requests with more than eight patterns or one longer than
-  2000 characters skip classification and reach the human directly.
+  script body does. Requests with more than forty patterns or more than
+  16000 characters across all patterns skip classification and reach the
+  human directly. The wide pattern budget exists because OpenCode splits
+  compound bash commands into segments: an `agent-browser eval` verification
+  run chained with `;` produced up to twenty-eight segments and used to skip
+  the classifier entirely.
 - Every request that reaches a decision is audited to `permission-audit.log`
   in the OpenCode data directory. One JSON line records each Jev
   classification that answers a still-open request: permission name, model,
@@ -191,9 +208,13 @@ an answer reach this flow.
    `reject`; it never reaches the classifier, so it writes no classification
    line. Commands that OpenCode's allow or
   deny rules handle emit no events and never reach the file. Patterns longer
-  than 2000 characters are shortened and carry `"truncated": true`. Use the
-  file to move safe commands into the allow list and to check how often each
-  actor decides.
+   than 2000 characters are shortened and carry `"truncated": true`. Use the
+   file to move safe commands into the allow list and to check how often each
+   actor decides.
+- The audit file keeps the last thirty days. Each append drops lines whose
+  `time` is older than the window, and lines without a readable time; the
+  rewrite lands through a rename so a reader never sees a truncated file.
+  Both audit logs share this retention.
 - OpenRouter's [Jev guide](https://openrouter.ai/docs/guides/community/jev)
   describes the model and Decisions API. Its [permission prompt
   example](https://openrouter.ai/docs/cookbook/coding-agents/auto-approve-permission-prompts-with-jev)
@@ -262,6 +283,14 @@ call runs on. This guard watches the reasoning stream instead.
   no TUI attached; only the human wake-up needs the terminal.
 - Each interrupt logs `ReasoningLoopInterrupted` with the probability.
   Failures log under `ReasoningLoop*` keys.
+- Every Jev spiral check also appends one JSON line to
+  `reasoning-loop-audit.log` in the OpenCode data directory: session id,
+  model, the probability (`null` when the call failed), the outcome
+  (`cleared`, `confirmed`, `stale`, or `failed`), and the repeated phrase
+  shortened to 200 characters. The file answers "is this model spiraling?"
+  after the fact — how many checks it cost and how the probabilities
+  spread. It keeps the last thirty days, the same retention as the
+  permission audit.
 - The **Reasoning Loop Guard** row in `/essentials` controls the feature.
   It shares the classifier credential and the classifier model choice with
   the Permission Assistant; the default is Jev (`typesafe/jev-1.13`).
@@ -312,11 +341,17 @@ the same padded line.
   turn duration is gone: it mostly measured tool time, which the rate
   window already excludes.
 - The numbers carry the same bands the verdict reads: the token rate is blue
-  at 80 tok/s or better, green at 40, yellow at 20, red below. The waits
-  take their color from the start value: blue at 1.5s or less, green at 3s,
-  yellow at 10s, red beyond. A slow start is a provider problem; long
+  at 70 tok/s or better, green at 30, yellow at 15, red below. The waits
+  take their color from the start value: blue at 2s or less, green at 5s,
+  yellow at 15s, red beyond. A slow start is a provider problem; long
   thinking is not. Numbers and units carry the color; brackets and
   separators stay muted.
+- The row ends with `auto N/M`: of the permission requests decided since the
+  TUI started, how many Jev answered on its own — a fresh verdict or a
+  replay from its session memory — out of the total decided, human replies
+  and doom-loop interrupts included. It appears once the first request is
+  decided, and it counts the running terminal's decisions, not project
+  history. Disabling the Permission Assistant hides it.
 - The status bar does not show the output token count or response cost.
 - The **Response Usage Status** row in `/essentials` controls the line.
 

@@ -38,7 +38,8 @@ status bar, and assist with permissions.
     that needs approval.
 - **Permission Notifications**: on Linux, raises a pending request as a
   desktop notification with "Allow once" and "Allow always" actions when the
-  notification server supports them. OpenCode's own prompt stays as a
+  notification server supports them. On KDE a third action, "Go to window",
+  raises the terminal that owns the request. OpenCode's own prompt stays as a
   fallback.
   - *Problem it solves:* a prompt waits unseen behind a backgrounded terminal.
 - **Reasoning Loop Guard**: watches the reasoning stream for a model that
@@ -74,7 +75,7 @@ and deny lists. See [src/README.md](src/README.md) for the full behavior.
 One themed footer row, shared by the clock and the metrics:
 
 ```
-idle: 2m 38s · healthy (62/118 tok/s ~ 0.4s/11.3s)
+idle: 2m 38s · healthy (62/118 tok/s ~ 0.4s/11.3s) · auto 7/9
 ```
 
 - `idle: 2m 38s` — how long the session has waited for your input. It turns
@@ -101,12 +102,15 @@ idle: 2m 38s · healthy (62/118 tok/s ~ 0.4s/11.3s)
   which adds the model's hidden thinking tokens. The pair answers "is the
   provider slow, or is the model just thinking?": `20/200` streams fine and
   the wait was reasoning, while `20/24` genuinely crawls. A non-reasoning
-  model shows one number. Blue above 80, green above 40, yellow above 20,
+  model shows one number. Blue above 70, green above 30, yellow above 15,
   red below.
 - `~ 0.4s/11.3s` — the median waits: until the model started answering, and
   until the first visible text. The color follows the start value: blue
-  under 1.5s, green under 3s, yellow under 10s, red above. Numbers and
+  under 2s, green under 5s, yellow under 15s, red above. Numbers and
   units carry the color; the separators stay grey.
+- `auto 7/9` — of the permission requests decided since this terminal opened,
+  how many Jev handled on its own out of the total. It shows once the first
+  request is decided.
 
 The full measurement rules live in
 [`src/README.md`](src/README.md#response-usage-status).

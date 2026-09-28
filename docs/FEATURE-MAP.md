@@ -125,8 +125,12 @@ the rest of the session, so a repeat skips Jev; the classifier never replies
 external-directory requests are answered and re-checked each time, never
 remembered. The auto-allow reply is a `/essentials` row. Other results keep the
 prompt open and trigger a desktop notification. On Linux the notification
-carries **Allow once** and **Allow always** buttons; it does not depend on the
-TUI attention settings.
+carries **Allow once** and **Allow always** buttons; on KDE it also carries
+**Go to window**, which raises the terminal through a throwaway KWin script
+over D-Bus and answers nothing. It does not depend on the TUI attention
+settings. A request is sent to Jev when it carries at most forty patterns
+within a sixteen-thousand-character budget, the shape an `agent-browser eval`
+run reaches after OpenCode splits a compound command into segments.
 
 Every decision on a permission request is audited to `permission-audit.log` in
 the OpenCode data directory. A JSON line records each Jev classification that
@@ -139,7 +143,9 @@ decision line that follows a below-threshold verdict also carries that verdict
 under `classifier`, so the human's reply shows why Jev deferred. Requests that
 OpenCode's own allow or deny rules handle never reach a prompt, so they never
 reach this log. Inspect the file to decide which commands or paths to add to
-the allow list.
+the allow list. Both audit logs keep the last thirty days: each append rewrites
+the file through a rename under a cross-process lock, dropping aged and
+unreadable lines.
 
 **Flow:**
 
@@ -153,10 +159,11 @@ the allow list.
    `src/valueObject/openRouterApiKey.ts`, and
    `src/valueObject/openRouterModelId.ts` — validate request fields,
    credentials, model IDs, and reply identifiers.
-5. `src/features/permissionDecision.ts` — resolves the safety question for the
-   request's permission, sends its patterns to the Decisions API, and
-   validates the returned verdict: safe probability plus an optional
-   explanation from the answering model.
+5. `src/features/permissionDecision.ts` — gates the request (pattern count and
+   total-character budget), resolves the safety question for the request's
+   permission, sends its patterns to the Decisions API, and validates the
+   returned verdict: safe probability plus an optional explanation from the
+   answering model.
 6. `src/features/autoAllowPolicy.ts` and
    `src/valueObject/permissionReplyMode.ts` — decide whether a safe verdict is
    remembered. Only the edit class qualifies, and only when the stored
@@ -164,31 +171,40 @@ the allow list.
 7. `src/features/permissionMemory.ts` — bounded per-session store of the exact
    paths the classifier approved, checked before Jev so a repeat edit answers
    `once` with no network call; cleared on `session.deleted`.
-8. `src/features/permissionAudit.ts` — appends the classification and decision
-   lines to the audit log, sanitizing and length-capping each pattern and
-   explanation.
+8. `src/features/permissionAudit.ts` and `src/features/logRotation.ts` — append
+   the classification and decision lines to the audit log, sanitizing and
+   length-capping each pattern and explanation, and enforce the shared
+   thirty-day retention through a cross-process-locked rewrite.
 9. `src/features/notificationText.ts` — places request text after the
    end-of-options marker and escapes markup characters before passing it as
    the notification body.
-10. `src/permission-assistant.tsx` — answers a safe verdict with `once` and
-    remembers a qualifying edit path, replies `once` from memory before Jev on a
-    repeat, or replies `reject` with a correction for a doom loop. Otherwise it
-    keeps the prompt open and uses Linux `notify-send`, falling back to the
-    gated TUI attention API when that spawn fails. The desktop buttons reply
-    `once` or `always`.
-11. `src/features/permission-assistant.ts`, `src/features/registry.ts`,
-    `src/tui.ts`, `src/state.ts`, and
-    `src/documents/essentialsDocument.ts` — expose the feature toggle, the
-    auto-allow reply row, and persist a model or reply mode chosen in
-    `/essentials`.
-12. `src/openRouterAuth.test.ts`, `src/features/permissionDecision.test.ts`,
-    `src/features/autoAllowPolicy.test.ts`,
-    `src/features/permissionMemory.test.ts`,
-    `src/features/permissionAudit.test.ts`,
-    `src/valueObject/permissionRequest.test.ts`,
-    `src/valueObject/permissionReplyMode.test.ts`,
-    `src/valueObject/openRouterApiKey.test.ts`, and
-    `src/valueObject/openRouterModelId.test.ts` — test credential, model,
+10. `src/features/windowActivation.ts` — on KDE, builds the ancestor PID chain
+    and raises the terminal's window through a throwaway KWin script over
+    `busctl`; it never throws and never blocks the event loop.
+ 11. `src/features/permissionHandlingCounts.ts` — keeps the process-wide tally
+     of auto-handled versus total permission decisions the status bar reads.
+ 12. `src/permission-assistant.tsx` — answers a safe verdict with `once` and
+     remembers a qualifying edit path, replies `once` from memory before Jev on a
+     repeat, or replies `reject` with a correction for a doom loop. Otherwise it
+     keeps the prompt open and uses Linux `notify-send`, falling back to the
+     gated TUI attention API when that spawn fails. The desktop buttons reply
+     `once` or `always`; the KDE button only raises the window.
+ 13. `src/features/permission-assistant.ts`, `src/features/registry.ts`,
+     `src/tui.ts`, `src/state.ts`, and
+     `src/documents/essentialsDocument.ts` — expose the feature toggle, the
+     auto-allow reply row, and persist a model or reply mode chosen in
+     `/essentials`.
+ 14. `src/openRouterAuth.test.ts`, `src/features/permissionDecision.test.ts`,
+     `src/features/autoAllowPolicy.test.ts`,
+     `src/features/permissionMemory.test.ts`,
+     `src/features/permissionAudit.test.ts`,
+     `src/features/logRotation.test.ts`,
+     `src/features/permissionHandlingCounts.test.ts`,
+     `src/features/windowActivation.test.ts`,
+     `src/valueObject/permissionRequest.test.ts`,
+     `src/valueObject/permissionReplyMode.test.ts`,
+     `src/valueObject/openRouterApiKey.test.ts`, and
+     `src/valueObject/openRouterModelId.test.ts` — test credential, model,
     reply-mode, memory, and audit-line validation.
     `src/features/notificationText.test.ts` checks notification text safety.
 
@@ -213,7 +229,10 @@ confirmed interrupts per user turn, and three uncleared readings on the same
 loop — abstentions, failed calls, or a missing credential — after which the
 fourth suspect is treated as a runaway regardless of the classifier, so the
 guard cancels without a verdict. A TUI companion counts the same suspects and
-wakes the human at the fourth. Server feature 5; a `/essentials`
+wakes the human at the fourth. Every Jev spiral check also writes one JSON line
+to `reasoning-loop-audit.log` (session, model, probability, outcome, and a short
+phrase sample) so spiraling can be judged later; the file keeps the last thirty
+days. Server feature 5; a `/essentials`
 row toggles it and the classifier model of the Permission Assistant applies to
 it too.
 
@@ -227,17 +246,21 @@ it too.
 3. `src/features/permissionDecision.ts` — the shared Decisions API request,
    the "stuck" question for reasoning spirals, and the 0.80 confirmation
    threshold.
-4. `src/openRouterAuth.ts` + `src/state.ts` — the credential and the
-   classifier model, shared with the Permission Assistant; the toggle file
-   gates the feature at the decision point.
-5. `src/reasoning-loop-escalation.tsx` — TUI companion. It runs the same suspect
-   watcher over `message.part.updated` and, at the fourth suspect in a
-   response, raises the human wake-up through the attention API (toast
-   fallback), logging `ReasoningLoopHumanEscalation`.
-6. `src/tui.ts` — the `/essentials` row toggles the guard at runtime.
-7. `src/features/reasoning-loop-guard.test.ts` — tests spiral detection,
-   confirmed interrupts, cleared and stale verdicts, the budgets, and the
-   disabled paths.
+4. `src/features/reasoningLoopAudit.ts` and `src/features/logRotation.ts` —
+   append one line per spiral check to the doom log and enforce the shared
+   thirty-day retention.
+ 5. `src/openRouterAuth.ts` + `src/state.ts` — the credential and the
+    classifier model, shared with the Permission Assistant; the toggle file
+    gates the feature at the decision point.
+ 6. `src/reasoning-loop-escalation.tsx` — TUI companion. It runs the same suspect
+    watcher over `message.part.updated` and, at the fourth suspect in a
+    response, raises the human wake-up through the attention API (toast
+    fallback), logging `ReasoningLoopHumanEscalation`.
+ 7. `src/tui.ts` — the `/essentials` row toggles the guard at runtime.
+ 8. `src/features/reasoning-loop-guard.test.ts` and
+    `src/features/reasoningLoopAudit.test.ts` — tests spiral detection,
+    confirmed interrupts, cleared and stale verdicts, the budgets, the doom
+    log, and the disabled paths.
 
 ---
 
@@ -253,7 +276,9 @@ it leads: all blue renders `flying`, all green `healthy`, all yellow
 `sluggish`, any red `slow`, and colors that disagree `regular` in grey. The
 themed
 status bar places the idle counter first when the session is idle, then the
-verdict leading its bracketed numbers. Values and their units change color;
+verdict leading its bracketed numbers. A trailing `auto N/M` segment reports
+how many permission decisions Jev handled on its own out of the total decided
+since the terminal opened. Values and their units change color;
 brackets and separators stay muted. It does not
 show the output token count or response cost.
 
@@ -262,7 +287,9 @@ show the output token count or response cost.
 1. `tui.json` — loads `src/usage-status.tsx` as the shared status bar and
    passes the idle compactor timeout option.
 2. `src/usage-status.tsx` — checks feature toggles and registers one padded
-   footer row for the active session.
+   footer row for the active session; appends the `auto N/M` permission-handling
+   segment from `src/features/permissionHandlingCounts.ts` when the Permission
+   Assistant is on and has decided at least one request.
 3. `src/valueObject/sessionId.ts` — validates the active session ID before the
    TUI reads its messages and parts.
 4. `src/usage-status.tsx` and `src/statusBar/usageStatus.ts` — read the validated

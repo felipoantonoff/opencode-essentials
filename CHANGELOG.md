@@ -1,6 +1,15 @@
 # Changelog
 
 ```log
+0.7.0 - 2026/09/28
+docs: document the audit logs, window raise, and status changes
+feat: raise the terminal from a KDE notification click
+feat: count auto-handled permission decisions in the status bar
+feat: retune the response health bands
+feat: widen the classifier request gate
+feat: log every Jev spiral check to a doom log
+feat: keep thirty days of audit lines
+
 0.6.0 - 2026/09/26
 chore: bump package version to 0.6.0
 fix: remember approved edits per session instead of a broad edit rule
