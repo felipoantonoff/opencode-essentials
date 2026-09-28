@@ -9,6 +9,7 @@ export function escapeNotificationMarkup(notificationText: string): string {
 
 export function buildPermissionNotificationArguments(
   notificationText: string,
+  withFocusAction: boolean,
 ): string[] {
   return [
     "--app-name=OpenCode",
@@ -16,6 +17,7 @@ export function buildPermissionNotificationArguments(
     "--expire-time=0",
     "--action=allow=Allow once",
     "--action=always=Allow always",
+    ...(withFocusAction ? ["--action=focus=Go to window"] : []),
     END_OF_OPTIONS,
     "OpenCode needs permission",
     escapeNotificationMarkup(notificationText),

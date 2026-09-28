@@ -24,7 +24,10 @@ describe("escapeNotificationMarkup", () => {
 
   it("keeps untrusted body text after the end-of-options marker", () => {
     assert.deepEqual(
-      buildPermissionNotificationArguments("--action=allow=Do not allow"),
+      buildPermissionNotificationArguments(
+        "--action=allow=Do not allow",
+        false,
+      ),
       [
         "--app-name=OpenCode",
         "--wait",
@@ -36,5 +39,12 @@ describe("escapeNotificationMarkup", () => {
         "--action=allow=Do not allow",
       ],
     )
+  })
+
+  it("offers the go-to-window action only when the caller enables it", () => {
+    const withFocus = buildPermissionNotificationArguments("ls", true)
+    const withoutFocus = buildPermissionNotificationArguments("ls", false)
+    assert.ok(withFocus.includes("--action=focus=Go to window"))
+    assert.ok(!withoutFocus.some((arg) => arg.startsWith("--action=focus")))
   })
 })

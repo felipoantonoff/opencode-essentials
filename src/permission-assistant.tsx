@@ -14,17 +14,21 @@ import {
   type PermissionAuditReply,
 } from "./features/permissionAudit.ts"
 import {
-  type ClassifierQuestion,
-  classifierQuestion,
+  classifierQuestionFor,
   DEFAULT_CLASSIFIER_MODEL,
   type DecisionVerdict,
   isSafePermissionProbability,
   requestDecisionVerdict,
 } from "./features/permissionDecision.ts"
+import { countPermissionDecision } from "./features/permissionHandlingCounts.ts"
 import {
   newPermissionMemory,
   type PermissionMemory,
 } from "./features/permissionMemory.ts"
+import {
+  requestOwningWindowActivation,
+  supportsWindowActivation,
+} from "./features/windowActivation.ts"
 import { sanitizeText } from "./log.ts"
 import { readOpenRouterApiKey } from "./openRouterAuth.ts"
 import {
@@ -41,10 +45,9 @@ import { newPermissionRequest } from "./valueObject/permissionRequest.ts"
 import type { PermissionRequestId } from "./valueObject/permissionRequestId.ts"
 import { newPermissionRequestId } from "./valueObject/permissionRequestId.ts"
 
-const MAX_CLASSIFIER_PATTERNS = 8
-const MAX_CLASSIFIER_PATTERN_CHARS = 2_000
 const ALLOW_ACTION = "allow"
 const ALWAYS_ACTION = "always"
+const FOCUS_ACTION = "focus"
 const DOOM_LOOP_PERMISSION = "doom_loop" as PermissionName
 const DOOM_LOOP_CORRECTION =
   "The doom-loop guard stopped this action: you are repeating the same call. Do not retry it unchanged. Change your approach or report the blocker and what you tried."
@@ -69,17 +72,6 @@ function isCurrentPermission(
   permission: PendingPermission,
 ): boolean {
   return pendingPermissions.get(permission.request.id) === permission
-}
-
-function classifierQuestionFor(
-  request: PermissionRequest,
-): ClassifierQuestion | undefined {
-  if (request.patterns.length === 0) return undefined
-  if (request.patterns.length > MAX_CLASSIFIER_PATTERNS) return undefined
-  const fitsLimit = request.patterns.every(
-    (pattern) => pattern.length <= MAX_CLASSIFIER_PATTERN_CHARS,
-  )
-  return fitsLimit ? classifierQuestion(request.permission) : undefined
 }
 
 function formatPermissionNotificationMessage(
@@ -233,6 +225,7 @@ function showLinuxPermissionNotification(
     "notify-send",
     buildPermissionNotificationArguments(
       formatPermissionNotificationMessage(permission.request),
+      supportsWindowActivation(process.env.XDG_CURRENT_DESKTOP),
     ),
     { stdio: ["ignore", "pipe", "ignore"] },
   )
@@ -269,8 +262,31 @@ function showLinuxPermissionNotification(
       )
       return
     }
+    if (action === FOCUS_ACTION) {
+      void raisePermissionWindow(api, permission)
+      return
+    }
     if (exitCode !== 0) showAttentionNotification(api, permission)
   })
+}
+
+// A "Go to window" click raises the terminal that owns the pending request and
+// answers nothing: the user asked to see the prompt, not to reply to it. The
+// notification is gone once notify-send exits; OpenCode's own prompt stays
+// open in the now-visible terminal.
+async function raisePermissionWindow(
+  api: TuiPluginApi,
+  permission: PendingPermission,
+): Promise<void> {
+  const reachedCompositor = await requestOwningWindowActivation(
+    `opencode-${permission.request.id}`,
+  )
+  if (reachedCompositor) return
+  void logPermissionFailure(
+    api,
+    "PermissionWindowActivationFailed",
+    "KWin did not accept the window activation request",
+  )
 }
 
 function showPermissionNotification(
@@ -501,10 +517,12 @@ const tui: TuiPlugin = async (api) => {
     if (!requestId) return
     const permission = pendingPermissions.get(requestId)
     if (permission) {
+      const actor = permission.authorizedActor ?? "user"
+      countPermissionDecision(actor)
       const decisionFailure = auditPermissionDecision({
         request: permission.request,
         projectDirectory: api.state.path.directory,
-        actor: permission.authorizedActor ?? "user",
+        actor,
         reply: event.properties.reply,
         ...(permission.classifierVerdict === undefined
           ? {}
