@@ -264,7 +264,7 @@ describe("resolveResponseStatus", () => {
       id: "msg_warning",
       completedAgoMs: 10_000,
       durationMs: 10_000,
-      outputTokens: 300,
+      outputTokens: 200,
     }
     const error: ResponsePlacement = {
       id: "msg_error",
@@ -298,12 +298,12 @@ describe("resolveResponseStatus", () => {
     }
     const status = resolveResponseStatus(
       [createAssistantMessage(slowStart)],
-      createPartReader(slowStart, { textStartMs: 4_000 }),
+      createPartReader(slowStart, { textStartMs: 6_000 }),
       NOW_MS,
     )
 
     assert.ok(status)
-    assert.equal(status.medianFirstActivityLatencyMs, 4_000)
+    assert.equal(status.medianFirstActivityLatencyMs, 6_000)
     assert.equal(formatResponseStatus(status)[1]?.tone, "warning")
   })
 
@@ -417,13 +417,13 @@ describe("resolveResponseStatus", () => {
           id: "msg_troubled",
           completedAgoMs: 10_000,
           durationMs: 10_000,
-          outputTokens: 300,
+          outputTokens: 150,
         },
         {
           id: "msg_troubled_two",
           completedAgoMs: 15_000,
           durationMs: 10_000,
-          outputTokens: 300,
+          outputTokens: 150,
         },
       ].map(createAssistantMessage),
       () => [],
@@ -517,13 +517,13 @@ describe("resolveResponseStatus", () => {
       responses.map(createAssistantMessage),
       mergePartReaders([
         createPartReader(responses[0], { textStartMs: 1_000 }),
-        createPartReader(responses[1], { textStartMs: 2_000 }),
+        createPartReader(responses[1], { textStartMs: 2_500 }),
         createPartReader(responses[2], { textStartMs: 40_000 }),
       ]),
       NOW_MS,
     )
 
-    assert.equal(status?.medianFirstActivityLatencyMs, 2_000)
+    assert.equal(status?.medianFirstActivityLatencyMs, 2_500)
     assert.equal(status?.healthLevel, "healthy")
   })
 
@@ -626,7 +626,7 @@ describe("resolveResponseStatus", () => {
       placements.map(createAssistantMessage),
       (messageId) =>
         messageId === slowStartId
-          ? [{ type: "text", time: { start: slowStartCreatedMs + 4_000 } }]
+          ? [{ type: "text", time: { start: slowStartCreatedMs + 6_000 } }]
           : [],
       NOW_MS,
     )
@@ -805,8 +805,8 @@ describe("formatResponseStatus", () => {
   it("leaves the waits out when no part timing survived validation", () => {
     const segments = formatResponseStatus({
       healthLevel: "sluggish",
-      averageTokensPerSecond: 30,
-      averageGenerationTokensPerSecond: 30,
+      averageTokensPerSecond: 20,
+      averageGenerationTokensPerSecond: 20,
       includesReasoning: false,
       medianFirstActivityLatencyMs: undefined,
       medianFirstTextLatencyMs: undefined,
@@ -814,7 +814,51 @@ describe("formatResponseStatus", () => {
 
     assert.deepEqual(segments, [
       { value: "sluggish", tone: "warning" },
-      { value: "30", tone: "warning", suffix: " tok/s" },
+      { value: "20", tone: "warning", suffix: " tok/s" },
     ])
+  })
+})
+
+describe("status band thresholds", () => {
+  function rateTone(tokensPerSecond: number) {
+    const [segment] = formatResponseStatus({
+      healthLevel: undefined,
+      averageTokensPerSecond: tokensPerSecond,
+      averageGenerationTokensPerSecond: tokensPerSecond,
+      includesReasoning: false,
+      medianFirstActivityLatencyMs: undefined,
+      medianFirstTextLatencyMs: undefined,
+    })
+    return segment?.tone
+  }
+
+  function startTone(latencyMs: number) {
+    const segments = formatResponseStatus({
+      healthLevel: undefined,
+      averageTokensPerSecond: 100,
+      averageGenerationTokensPerSecond: 100,
+      includesReasoning: false,
+      medianFirstActivityLatencyMs: latencyMs,
+      medianFirstTextLatencyMs: undefined,
+    })
+    return segments[segments.length - 1]?.tone
+  }
+
+  it("paints the token rate on the tuned bands", () => {
+    assert.equal(rateTone(70), "info")
+    assert.equal(rateTone(69.9), "good")
+    assert.equal(rateTone(30), "good")
+    assert.equal(rateTone(29.9), "warning")
+    assert.equal(rateTone(15), "warning")
+    assert.equal(rateTone(14.9), "error")
+  })
+
+  it("paints the start wait on the tuned bands", () => {
+    assert.equal(startTone(2_000), "info")
+    assert.equal(startTone(2_001), "good")
+    assert.equal(startTone(5_000), "good")
+    assert.equal(startTone(5_001), "warning")
+    assert.equal(startTone(15_000), "warning")
+    assert.equal(startTone(15_001), "error")
   })
 })

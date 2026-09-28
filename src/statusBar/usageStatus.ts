@@ -6,12 +6,16 @@ import { newTimestampMs } from "../valueObject/timestampMs.ts"
 import { isRecord } from "../valueObject/util.ts"
 import type { StatusBarTone } from "./tone.ts"
 
-const TOKEN_RATE_ERROR_TPS = 20
-const TOKEN_RATE_WARNING_TPS = 40
-const TOKEN_RATE_FLYING_TPS = 80
-const LATENCY_ERROR_MS = 10_000
-const LATENCY_WARNING_MS = 3_000
-const LATENCY_FLYING_MS = 1_500
+// Bands tuned so the top two tiers are reachable on ordinary providers:
+// the green floor sits at 30 tok/s and the blue ceiling at 70, and the start
+// wait turns yellow only past five seconds. A thinking model that streams
+// 30-60 tok/s reads healthy rather than sluggish.
+const TOKEN_RATE_ERROR_TPS = 15
+const TOKEN_RATE_WARNING_TPS = 30
+const TOKEN_RATE_FLYING_TPS = 70
+const LATENCY_ERROR_MS = 15_000
+const LATENCY_WARNING_MS = 5_000
+const LATENCY_FLYING_MS = 2_000
 const RESPONSE_WINDOW_MS = 5 * 60_000
 const RESPONSE_WINDOW_SIZE = 18
 const HEALTH_MIN_RESPONSES = 3
