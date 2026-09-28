@@ -340,12 +340,14 @@ the same padded line.
   missing, the group disappears and the rate stands alone. The old total
   turn duration is gone: it mostly measured tool time, which the rate
   window already excludes.
-- The numbers carry the same bands the verdict reads: the token rate is blue
-  at 70 tok/s or better, green at 30, yellow at 15, red below. The waits
-  take their color from the start value: blue at 2s or less, green at 5s,
-  yellow at 15s, red beyond. A slow start is a provider problem; long
-  thinking is not. Numbers and units carry the color; brackets and
-  separators stay muted.
+- The numbers carry the same bands the verdict reads: the thinking-inclusive
+  rate is blue at 100 tok/s or better, green at 60, grey at 45, yellow at
+  30, red below. The waits take their color from the start value: blue at
+  2s or less, green at 5s, yellow at 15s, red beyond. A slow start is a
+  provider problem; long thinking is not. The verdict and the pair color
+  read the thinking-inclusive rate, so a thinking model is judged by the
+  provider's stream, not by its thinking share. Numbers and units carry the
+  color; brackets and separators stay muted.
 - The row ends with `auto N/M`: of the permission requests decided since the
   TUI started, how many Jev answered on its own — a fresh verdict or a
   replay from its session memory — out of the total decided, human replies

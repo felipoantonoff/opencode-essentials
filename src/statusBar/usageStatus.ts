@@ -7,12 +7,13 @@ import { isRecord } from "../valueObject/util.ts"
 import type { StatusBarTone } from "./tone.ts"
 
 // Bands tuned so the top two tiers are reachable on ordinary providers:
-// the green floor sits at 30 tok/s and the blue ceiling at 70, and the start
-// wait turns yellow only past five seconds. A thinking model that streams
-// 30-60 tok/s reads healthy rather than sluggish.
-const TOKEN_RATE_ERROR_TPS = 15
-const TOKEN_RATE_WARNING_TPS = 30
-const TOKEN_RATE_FLYING_TPS = 70
+// green starts at 60 tok/s and blue at 100, grey marks the unremarkable
+// stream between 45 and 60, and the start wait turns yellow only past five
+// seconds.
+const TOKEN_RATE_ERROR_TPS = 30
+const TOKEN_RATE_WARNING_TPS = 45
+const TOKEN_RATE_REGULAR_TPS = 60
+const TOKEN_RATE_FLYING_TPS = 100
 const LATENCY_ERROR_MS = 15_000
 const LATENCY_WARNING_MS = 5_000
 const LATENCY_FLYING_MS = 2_000
@@ -158,6 +159,7 @@ function formatDuration(durationMs: number): string {
 function resolveTokenRateTone(tokensPerSecond: number): StatusBarTone {
   if (tokensPerSecond < TOKEN_RATE_ERROR_TPS) return "error"
   if (tokensPerSecond < TOKEN_RATE_WARNING_TPS) return "warning"
+  if (tokensPerSecond < TOKEN_RATE_REGULAR_TPS) return "muted"
   if (tokensPerSecond >= TOKEN_RATE_FLYING_TPS) return "info"
   return "good"
 }
@@ -245,16 +247,18 @@ function windowResponseTimings(
 
 // One tone source for the numbers and the verdict, so the verdict can
 // never disagree with the colors it leads: the rate gets its tone from the
-// pooled average, the waits from the start median that paints them.
+// thinking-inclusive average — the text-only rate measures how the model
+// splits its tokens between thinking and writing, not how fast the
+// provider streams — and the waits from the start median that paints them.
 function displayTones(readings: {
-  averageTokensPerSecond: number
+  averageGenerationTokensPerSecond: number
   medianFirstActivityLatencyMs: number | undefined
   medianFirstTextLatencyMs: number | undefined
 }): { rate: StatusBarTone; waits: StatusBarTone | undefined } {
   const toneStartMs =
     readings.medianFirstActivityLatencyMs ?? readings.medianFirstTextLatencyMs
   return {
-    rate: resolveTokenRateTone(readings.averageTokensPerSecond),
+    rate: resolveTokenRateTone(readings.averageGenerationTokensPerSecond),
     waits:
       toneStartMs === undefined ? undefined : resolveLatencyTone(toneStartMs),
   }
@@ -321,7 +325,7 @@ export function resolveResponseStatus(
   return {
     healthLevel: resolveHealthLevel(
       displayTones({
-        averageTokensPerSecond,
+        averageGenerationTokensPerSecond,
         medianFirstActivityLatencyMs,
         medianFirstTextLatencyMs,
       }),

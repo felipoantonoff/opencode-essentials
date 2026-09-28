@@ -135,7 +135,7 @@ describe("resolveResponseStatus", () => {
     })
     assert.ok(status)
     assert.deepEqual(formatResponseStatus(status), [
-      { value: "20", tone: "warning", suffix: " tok/s" },
+      { value: "20", tone: "error", suffix: " tok/s" },
       { value: "3.0s", tone: "good", separator: " ~ " },
     ])
   })
@@ -259,18 +259,18 @@ describe("resolveResponseStatus", () => {
     assert.equal(status, undefined)
   })
 
-  it("tones a rate under the error bar as error and under warning as warning", () => {
+  it("tones a rate under thirty as error and under forty-five as warning", () => {
     const warning: ResponsePlacement = {
       id: "msg_warning",
       completedAgoMs: 10_000,
       durationMs: 10_000,
-      outputTokens: 200,
+      outputTokens: 400,
     }
     const error: ResponsePlacement = {
       id: "msg_error",
       completedAgoMs: 10_000,
       durationMs: 10_000,
-      outputTokens: 100,
+      outputTokens: 200,
     }
     const warningStatus = resolveResponseStatus(
       [createAssistantMessage(warning)],
@@ -359,6 +359,38 @@ describe("resolveResponseStatus", () => {
     assert.equal(formatResponseStatus(status)[0]?.value, "30/90")
   })
 
+  it("judges a thinking model by the provider's stream, not the text share", () => {
+    const thinkingResponses: ResponsePlacement[] = [1, 2, 3].map((index) => ({
+      id: `msg_thinking_${index}`,
+      completedAgoMs: index * 10_000,
+      durationMs: 10_000,
+      outputTokens: 230,
+      reasoningTokens: 1_770,
+    }))
+    const status = resolveResponseStatus(
+      thinkingResponses.map(createAssistantMessage),
+      mergePartReaders(
+        thinkingResponses.map((response) =>
+          createPartReader(response, {
+            reasoningStartMs: 0,
+            reasoningEndMs: 4_000,
+            textStartMs: 4_000,
+            textEndMs: 10_000,
+          }),
+        ),
+      ),
+      NOW_MS,
+    )
+
+    assert.ok(status)
+    assert.equal(status.averageTokensPerSecond, 23)
+    assert.equal(status.averageGenerationTokensPerSecond, 200)
+    const [verdict, rate] = formatResponseStatus(status)
+    assert.equal(verdict?.value, "flying")
+    assert.equal(rate?.value, "23/200")
+    assert.equal(rate?.tone, "info")
+  })
+
   it("collapses the pair when both rates round to the same number", () => {
     const response: ResponsePlacement = {
       id: "msg_equal_rates",
@@ -388,19 +420,19 @@ describe("resolveResponseStatus", () => {
         id: "msg_healthy_one",
         completedAgoMs: 10_000,
         durationMs: 10_000,
-        outputTokens: 500,
+        outputTokens: 700,
       },
       {
         id: "msg_healthy_two",
         completedAgoMs: 20_000,
         durationMs: 10_000,
-        outputTokens: 500,
+        outputTokens: 700,
       },
       {
         id: "msg_healthy_three",
         completedAgoMs: 30_000,
         durationMs: 10_000,
-        outputTokens: 500,
+        outputTokens: 700,
       },
     ]
     const healthy = resolveResponseStatus(
@@ -462,19 +494,19 @@ describe("resolveResponseStatus", () => {
         id: "msg_mix_one",
         completedAgoMs: 10_000,
         durationMs: 10_000,
-        outputTokens: 300,
+        outputTokens: 350,
       },
       {
         id: "msg_mix_two",
         completedAgoMs: 20_000,
         durationMs: 10_000,
-        outputTokens: 300,
+        outputTokens: 350,
       },
       {
         id: "msg_mix_three",
         completedAgoMs: 30_000,
         durationMs: 10_000,
-        outputTokens: 200,
+        outputTokens: 250,
       },
     ]
     const regular = resolveResponseStatus(
@@ -532,7 +564,7 @@ describe("resolveResponseStatus", () => {
       id: `msg_flying_${index}`,
       completedAgoMs: index * 10_000,
       durationMs: 10_000,
-      outputTokens: 900,
+      outputTokens: 1_000,
     }))
     const status = resolveResponseStatus(
       fastResponses.map(createAssistantMessage),
@@ -640,19 +672,19 @@ describe("resolveResponseStatus", () => {
         id: "msg_recent_one",
         completedAgoMs: 10_000,
         durationMs: 10_000,
-        outputTokens: 500,
+        outputTokens: 700,
       },
       {
         id: "msg_recent_two",
         completedAgoMs: 20_000,
         durationMs: 10_000,
-        outputTokens: 500,
+        outputTokens: 700,
       },
       {
         id: "msg_recent_three",
         completedAgoMs: 30_000,
         durationMs: 10_000,
-        outputTokens: 500,
+        outputTokens: 700,
       },
     ]
     const poorStale: ResponsePlacement[] = [
@@ -670,7 +702,7 @@ describe("resolveResponseStatus", () => {
     )
 
     assert.equal(status?.healthLevel, "healthy")
-    assert.equal(status?.averageTokensPerSecond, 50)
+    assert.equal(status?.averageTokensPerSecond, 70)
   })
 
   it("caps the window at eighteen responses", () => {
@@ -733,8 +765,8 @@ describe("formatResponseStatus", () => {
   it("brackets the reading when the verdict and the waits share the story", () => {
     const segments = formatResponseStatus({
       healthLevel: "healthy",
-      averageTokensPerSecond: 62,
-      averageGenerationTokensPerSecond: 118,
+      averageTokensPerSecond: 30,
+      averageGenerationTokensPerSecond: 62,
       includesReasoning: true,
       medianFirstActivityLatencyMs: 400,
       medianFirstTextLatencyMs: 11_300,
@@ -743,7 +775,7 @@ describe("formatResponseStatus", () => {
     assert.deepEqual(segments, [
       { value: "healthy", tone: "good" },
       {
-        value: "62/118",
+        value: "30/62",
         tone: "good",
         prefix: "(",
         suffix: " tok/s",
@@ -766,8 +798,8 @@ describe("formatResponseStatus", () => {
   it("colors the numbers on the same bands the verdict reads", () => {
     const segments = formatResponseStatus({
       healthLevel: "flying",
-      averageTokensPerSecond: 90,
-      averageGenerationTokensPerSecond: 90,
+      averageTokensPerSecond: 110,
+      averageGenerationTokensPerSecond: 110,
       includesReasoning: false,
       medianFirstActivityLatencyMs: 900,
       medianFirstTextLatencyMs: undefined,
@@ -776,7 +808,7 @@ describe("formatResponseStatus", () => {
     assert.deepEqual(segments, [
       { value: "flying", tone: "info" },
       {
-        value: "90",
+        value: "110",
         tone: "info",
         prefix: "(",
         suffix: " tok/s",
@@ -805,8 +837,8 @@ describe("formatResponseStatus", () => {
   it("leaves the waits out when no part timing survived validation", () => {
     const segments = formatResponseStatus({
       healthLevel: "sluggish",
-      averageTokensPerSecond: 20,
-      averageGenerationTokensPerSecond: 20,
+      averageTokensPerSecond: 35,
+      averageGenerationTokensPerSecond: 35,
       includesReasoning: false,
       medianFirstActivityLatencyMs: undefined,
       medianFirstTextLatencyMs: undefined,
@@ -814,7 +846,7 @@ describe("formatResponseStatus", () => {
 
     assert.deepEqual(segments, [
       { value: "sluggish", tone: "warning" },
-      { value: "20", tone: "warning", suffix: " tok/s" },
+      { value: "35", tone: "warning", suffix: " tok/s" },
     ])
   })
 })
@@ -845,12 +877,14 @@ describe("status band thresholds", () => {
   }
 
   it("paints the token rate on the tuned bands", () => {
-    assert.equal(rateTone(70), "info")
-    assert.equal(rateTone(69.9), "good")
-    assert.equal(rateTone(30), "good")
-    assert.equal(rateTone(29.9), "warning")
-    assert.equal(rateTone(15), "warning")
-    assert.equal(rateTone(14.9), "error")
+    assert.equal(rateTone(100), "info")
+    assert.equal(rateTone(99.9), "good")
+    assert.equal(rateTone(60), "good")
+    assert.equal(rateTone(59.9), "muted")
+    assert.equal(rateTone(45), "muted")
+    assert.equal(rateTone(44.9), "warning")
+    assert.equal(rateTone(30), "warning")
+    assert.equal(rateTone(29.9), "error")
   })
 
   it("paints the start wait on the tuned bands", () => {
