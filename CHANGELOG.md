@@ -2,6 +2,7 @@
 
 ```log
 0.7.0 - 2026/09/28
+chore: bump package version to 0.7.0
 docs: make the main readme a landing page
 chore: add override scoping the main readme
 feat: judge the provider by the thinking-inclusive rate and retune the bands
