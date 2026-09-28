@@ -7,6 +7,8 @@ import type {
 } from "@opencode-ai/plugin/tui"
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import type { EssentialsConfig } from "./documents/essentialsDocument.ts"
+import { permissionAssistantFeature } from "./features/permission-assistant.ts"
+import { readPermissionHandlingCounts } from "./features/permissionHandlingCounts.ts"
 import { usageStatusFeature } from "./features/usage-status.ts"
 import { sanitizeText } from "./log.ts"
 import { isFeatureEnabled, readEssentialsConfig } from "./state.ts"
@@ -29,7 +31,7 @@ const CLOCK_TICK_MS = 1_000
 
 type StatusBarLines = {
   idleClock: IdleClockLine | undefined
-  responseUsage: ResponseUsageSegment[] | undefined
+  metrics: ResponseUsageSegment[] | undefined
 }
 
 function resolveSessionId(api: TuiPluginApi): SessionId | undefined {
@@ -57,6 +59,17 @@ function resolveResponseUsageLine(
   return formatResponseStatus(status)
 }
 
+function resolvePermissionHandlingSegment(
+  config: EssentialsConfig,
+): ResponseUsageSegment | undefined {
+  if (!isFeatureEnabled(config, permissionAssistantFeature.id)) {
+    return undefined
+  }
+  const counts = readPermissionHandlingCounts()
+  if (counts.total === 0) return undefined
+  return { value: `auto ${counts.autoHandled}/${counts.total}`, tone: "muted" }
+}
+
 function resolveStatusBarLines(
   api: TuiPluginApi,
   config: EssentialsConfig,
@@ -71,9 +84,15 @@ function resolveStatusBarLines(
     nowMs,
     defaultIdleTimeoutMs,
   )
-  const responseUsage = resolveResponseUsageLine(api, config, sessionId, nowMs)
-  if (!idleClock && !responseUsage) return undefined
-  return { idleClock, responseUsage }
+  const usageSegments =
+    resolveResponseUsageLine(api, config, sessionId, nowMs) ?? []
+  const handlingSegment = resolvePermissionHandlingSegment(config)
+  const metrics =
+    handlingSegment === undefined
+      ? usageSegments
+      : [...usageSegments, handlingSegment]
+  if (!idleClock && metrics.length === 0) return undefined
+  return { idleClock, metrics: metrics.length > 0 ? metrics : undefined }
 }
 
 function reportConfigReadFailure(api: TuiPluginApi, failure: unknown): void {
@@ -145,12 +164,12 @@ function StatusBarView(props: {
               </text>
             )}
           </Show>
-          <Show when={currentLines().idleClock && currentLines().responseUsage}>
+          <Show when={currentLines().idleClock && currentLines().metrics}>
             <text fg={props.api.theme.current.textMuted} wrapMode="none">
               ·
             </text>
           </Show>
-          <Show when={currentLines().responseUsage}>
+          <Show when={currentLines().metrics}>
             {(segments: () => ResponseUsageSegment[]) => (
               <text fg={props.api.theme.current.textMuted} wrapMode="none">
                 <For each={segments()}>
