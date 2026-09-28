@@ -2,6 +2,9 @@
 
 ```log
 0.7.0 - 2026/09/28
+docs: make the main readme a landing page
+chore: add override scoping the main readme
+feat: judge the provider by the thinking-inclusive rate and retune the bands
 docs: document the audit logs, window raise, and status changes
 feat: raise the terminal from a KDE notification click
 feat: count auto-handled permission decisions in the status bar
