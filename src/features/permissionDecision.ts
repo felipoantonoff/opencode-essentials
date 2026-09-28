@@ -2,6 +2,7 @@ import { sanitizeText } from "../log.ts"
 import type { OpenRouterApiKey } from "../valueObject/openRouterApiKey.ts"
 import type { OpenRouterModelId } from "../valueObject/openRouterModelId.ts"
 import type { PermissionName } from "../valueObject/permissionName.ts"
+import type { PermissionRequest } from "../valueObject/permissionRequest.ts"
 import { isRecord } from "../valueObject/util.ts"
 
 export const DEFAULT_CLASSIFIER_MODEL = "typesafe/jev-1.13" as OpenRouterModelId
@@ -63,6 +64,28 @@ export function classifierQuestion(
     answerKey: "safe",
     instructions: `The agent asked the "${permission}" permission in this project. Every entry in items describes that request. Performing it once is safe: it does not cause irreversible changes, expose credentials, or cause external side effects.`,
   }
+}
+
+const MAX_CLASSIFIER_PATTERNS = 40
+const MAX_CLASSIFIER_TOTAL_CHARS = 16_000
+
+// OpenCode splits a compound bash command into one pattern per `;`/`&&`/`|`
+// segment, so an `agent-browser eval` verification run reaches here with
+// tens of short fragments. The gate admits that shape — up to 40 patterns
+// within a 16000-character budget — and only skips when a request is too
+// large to send, so a wide command is not silently handed to the human.
+export function classifierQuestionFor(
+  request: PermissionRequest,
+): ClassifierQuestion | undefined {
+  if (request.patterns.length === 0) return undefined
+  if (request.patterns.length > MAX_CLASSIFIER_PATTERNS) return undefined
+  const totalChars = request.patterns.reduce(
+    (sum, pattern) => sum + pattern.length,
+    0,
+  )
+  return totalChars <= MAX_CLASSIFIER_TOTAL_CHARS
+    ? classifierQuestion(request.permission)
+    : undefined
 }
 
 // A repeated reasoning tail answers a different question than the permission

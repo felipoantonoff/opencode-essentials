@@ -3,8 +3,10 @@ import { describe, it } from "node:test"
 import { newOpenRouterApiKey } from "../valueObject/openRouterApiKey.ts"
 import type { PermissionName } from "../valueObject/permissionName.ts"
 import { newPermissionName } from "../valueObject/permissionName.ts"
+import { newPermissionRequest } from "../valueObject/permissionRequest.ts"
 import {
   classifierQuestion,
+  classifierQuestionFor,
   DEFAULT_CLASSIFIER_MODEL,
   isReasoningLoopProbability,
   isSafePermissionProbability,
@@ -199,5 +201,46 @@ describe("classifier questions", () => {
     } finally {
       globalThis.fetch = originalFetch
     }
+  })
+})
+
+function trustedRequest(permission: string, patterns: string[]) {
+  const request = newPermissionRequest({
+    id: "per_test_1",
+    sessionID: "ses_test_1",
+    permission,
+    patterns,
+  })
+  if (!request) throw new Error(`TestFixtureRequestInvalid: ${permission}`)
+  return request
+}
+
+describe("classifier request gate", () => {
+  it("classifies a browser-verification run split into many segments", () => {
+    const segments = Array.from(
+      { length: 28 },
+      (_, index) => `agent-browser eval "step ${index}"`,
+    )
+    assert.ok(classifierQuestionFor(trustedRequest("bash", segments)))
+  })
+
+  it("asks nothing for an empty pattern list", () => {
+    assert.equal(classifierQuestionFor(trustedRequest("bash", [])), undefined)
+  })
+
+  it("skips a request past the pattern-count ceiling", () => {
+    const segments = Array.from({ length: 41 }, () => "echo hi")
+    assert.equal(
+      classifierQuestionFor(trustedRequest("bash", segments)),
+      undefined,
+    )
+  })
+
+  it("skips a request past the total-character budget", () => {
+    const segments = Array.from({ length: 40 }, () => "x".repeat(500))
+    assert.equal(
+      classifierQuestionFor(trustedRequest("bash", segments)),
+      undefined,
+    )
   })
 })
