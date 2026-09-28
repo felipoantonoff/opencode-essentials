@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, it } from "node:test"
@@ -12,6 +12,7 @@ import {
   reasoningLoopGuardFeature,
   splitReasoningWords,
 } from "./reasoning-loop-guard.ts"
+import { resolveReasoningLoopAuditLogPath } from "./reasoningLoopAudit.ts"
 
 const GUARD_ID = newFeatureId("reasoning-loop-guard")
 const originalFetch = globalThis.fetch
@@ -257,6 +258,41 @@ describe("reasoning-loop-guard", () => {
 
     assert.equal(fake.abortCalls.length, 0)
     assert.equal(fake.promptRequests.length, 0)
+    await hooks.dispose?.()
+  })
+
+  it("records every Jev spiral check in the doom log", async () => {
+    const fake = fakeClient()
+    const hooks = await startGuard(fake)
+    const control = stubDecisionsFetch()
+
+    await hooks.event?.({
+      event: reasoningPartEvent("s1", "msg_doom_confirmed", SPIRAL_TEXT),
+    })
+    control.resolve(0.95)
+    await waitFor(() => fake.abortCalls.length === 1)
+
+    await hooks.event?.({
+      event: reasoningPartEvent("s2", "msg_doom_cleared", SPIRAL_TEXT),
+    })
+    control.resolve(0.4)
+    await waitFor(() =>
+      fake.logMessages.includes("ReasoningLoopVerdictCleared"),
+    )
+
+    const lines = readFileSync(resolveReasoningLoopAuditLogPath(), "utf8")
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+    assert.deepEqual(
+      lines.map((line) => [line.session, line.outcome, line.probability]),
+      [
+        ["s1", "confirmed", 0.95],
+        ["s2", "cleared", 0.4],
+      ],
+    )
+    assert.equal(lines[0]?.model, "typesafe/jev-1.13")
+    assert.ok(String(lines[0]?.phrase).startsWith("alpha0"))
     await hooks.dispose?.()
   })
 

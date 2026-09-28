@@ -10,6 +10,7 @@ import {
 import type { FeatureId } from "../valueObject/featureId.ts"
 import type { MessageId } from "../valueObject/messageId.ts"
 import { newMessageId } from "../valueObject/messageId.ts"
+import type { OpenRouterModelId } from "../valueObject/openRouterModelId.ts"
 import type { PartId } from "../valueObject/partId.ts"
 import { newPartId } from "../valueObject/partId.ts"
 import type { SessionId } from "../valueObject/sessionId.ts"
@@ -25,6 +26,10 @@ import {
   REASONING_LOOP_QUESTION,
   requestDecisionVerdict,
 } from "./permissionDecision.ts"
+import {
+  auditReasoningLoopCheck,
+  type ReasoningLoopVerdictOutcome,
+} from "./reasoningLoopAudit.ts"
 import { CLIENT_REQUEST_DEADLINE_MS } from "./requestDeadline.ts"
 
 export const reasoningLoopGuardId: FeatureId =
@@ -275,6 +280,28 @@ async function abortRunWithCorrection(
   }
 }
 
+// Every Jev spiral check leaves one line in the doom log, whatever the
+// guard does with the verdict next. A log that cannot be written is loud:
+// the audit is the only place the spiraling question is answered later.
+async function recordSpiralCheck(
+  tracker: LoopGuardTracker,
+  check: {
+    sessionId: SessionId
+    model: OpenRouterModelId
+    phrase: string
+    outcome: ReasoningLoopVerdictOutcome
+    probability: number | undefined
+  },
+): Promise<void> {
+  const auditFailure = auditReasoningLoopCheck(check)
+  if (auditFailure) {
+    await writeLog(tracker.client, "warn", "ReasoningLoopAuditWriteFailed", {
+      sessionId: check.sessionId,
+      error: String(auditFailure),
+    })
+  }
+}
+
 async function judgeSuspectedSpiral(
   tracker: LoopGuardTracker,
   suspect: SpiralSuspect,
@@ -319,6 +346,13 @@ async function judgeSuspectedSpiral(
   } catch (failure) {
     settleIfActive(tracker, sessionId, messageId, true)
     ensureSessionPolicy(tracker, sessionId).unclearedReadings += 1
+    await recordSpiralCheck(tracker, {
+      sessionId,
+      model,
+      phrase,
+      outcome: "failed",
+      probability: undefined,
+    })
     await writeLog(
       tracker.client,
       "warn",
@@ -332,12 +366,26 @@ async function judgeSuspectedSpiral(
   }
   if (tracker.isDisposed) return
   if (!tracker.watcher.isMessageActive(sessionId, messageId)) {
+    await recordSpiralCheck(tracker, {
+      sessionId,
+      model,
+      phrase,
+      outcome: "stale",
+      probability: verdict.probability,
+    })
     await writeLog(tracker.client, "debug", "ReasoningLoopVerdictStale", {
       sessionId,
     })
     return
   }
   if (!isReasoningLoopProbability(verdict.probability)) {
+    await recordSpiralCheck(tracker, {
+      sessionId,
+      model,
+      phrase,
+      outcome: "cleared",
+      probability: verdict.probability,
+    })
     tracker.watcher.settle(sessionId, true)
     const policy = ensureSessionPolicy(tracker, sessionId)
     policy.unclearedReadings += 1
@@ -348,6 +396,13 @@ async function judgeSuspectedSpiral(
     })
     return
   }
+  await recordSpiralCheck(tracker, {
+    sessionId,
+    model,
+    phrase,
+    outcome: "confirmed",
+    probability: verdict.probability,
+  })
   const policy = ensureSessionPolicy(tracker, sessionId)
   if (policy.interruptCount >= MAX_CANCELLED_SPIRALS_PER_TURN) {
     tracker.watcher.forgetMessage(sessionId)
