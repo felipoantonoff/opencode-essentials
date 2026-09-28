@@ -1,9 +1,9 @@
-import { appendFileSync, mkdirSync } from "node:fs"
 import path from "node:path"
 import { sanitizeText } from "../log.ts"
 import { resolveEssentialsStatePath } from "../state.ts"
 import type { OpenRouterModelId } from "../valueObject/openRouterModelId.ts"
 import type { PermissionRequest } from "../valueObject/permissionRequest.ts"
+import { writeAuditRecord } from "./logRotation.ts"
 import type { DecisionVerdict } from "./permissionDecision.ts"
 
 // `assistant` is the plugin's own rule answering on the user's behalf with no
@@ -43,14 +43,7 @@ function newAuditBase(request: PermissionRequest, projectDirectory: string) {
 }
 
 function appendAuditRecord(record: Record<string, unknown>): unknown {
-  try {
-    const logPath = resolvePermissionAuditLogPath()
-    mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 })
-    appendFileSync(logPath, `${JSON.stringify(record)}\n`, { mode: 0o600 })
-    return undefined
-  } catch (failure) {
-    return failure
-  }
+  return writeAuditRecord(resolvePermissionAuditLogPath(), record)
 }
 
 export function auditPermissionClassification(input: {

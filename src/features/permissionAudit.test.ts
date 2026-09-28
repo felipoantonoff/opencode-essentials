@@ -2,9 +2,11 @@ import assert from "node:assert/strict"
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -189,13 +191,46 @@ describe("permission audit log", () => {
       reply: "once",
     })
     assert.equal(firstFailure, undefined)
-    chmodSync(resolvePermissionAuditLogPath(), 0o400)
-    const secondFailure = auditPermissionDecision({
+    // A read-only file no longer blocks the write on its own: the daily
+    // compaction replaces the file through a rename, which needs only a
+    // writable directory. A real failure now needs both the file unwritable
+    // and the directory unable to hold the compaction's lock and temp file.
+    const logPath = resolvePermissionAuditLogPath()
+    const logDirectory = path.dirname(logPath)
+    chmodSync(logPath, 0o400)
+    chmodSync(logDirectory, 0o500)
+    try {
+      const secondFailure = auditPermissionDecision({
+        request: trustedRequest(["git status"]),
+        projectDirectory: "/home/dev/project",
+        actor: "user",
+        reply: "once",
+      })
+      assert.ok(secondFailure instanceof Error)
+    } finally {
+      chmodSync(logDirectory, 0o700)
+    }
+  })
+
+  it("drops audit lines older than the thirty-day retention", () => {
+    const agedLine = `${JSON.stringify({
+      time: new Date(Date.now() - 31 * 24 * 60 * 60 * 1_000).toISOString(),
+      type: "decision",
+      patterns: ["git log"],
+    })}\n`
+    mkdirSync(path.dirname(resolvePermissionAuditLogPath()), {
+      recursive: true,
+    })
+    writeFileSync(resolvePermissionAuditLogPath(), agedLine)
+    auditPermissionDecision({
       request: trustedRequest(["git status"]),
       projectDirectory: "/home/dev/project",
       actor: "user",
       reply: "once",
     })
-    assert.ok(secondFailure instanceof Error)
+
+    const lines = readAuditLines()
+    assert.equal(lines.length, 1)
+    assert.deepEqual(lines[0]?.patterns, ["git status"])
   })
 })
