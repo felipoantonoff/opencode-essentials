@@ -1,11 +1,12 @@
-import { type ChildProcess, spawn } from "node:child_process"
+import { type ChildProcess, execFile, spawn } from "node:child_process"
+import { promisify } from "node:util"
 import type {
   TuiPlugin,
   TuiPluginApi,
   TuiPluginModule,
 } from "@opencode-ai/plugin/tui"
 import { shouldRememberApproval } from "./features/autoAllowPolicy.ts"
-import { buildPermissionNotificationArguments } from "./features/notificationText.ts"
+import { buildPermissionNotificationArguments, parseNotificationOutput } from "./features/notificationText.ts"
 import { permissionAssistantFeature } from "./features/permission-assistant.ts"
 import {
   auditPermissionClassification,
@@ -56,6 +57,7 @@ type PendingPermission = {
   request: PermissionRequest
   abort: AbortController
   notification?: ChildProcess
+  notificationId?: number
   hasReplied: boolean
   authorizedActor?: PermissionAuditActor
   classifierVerdict?: DecisionVerdict
@@ -144,9 +146,34 @@ function showAttentionNotification(
 }
 
 function stopPermissionNotification(permission: PendingPermission): void {
-  if (!permission.notification) return
-  if (permission.notification.exitCode !== null) return
-  permission.notification.kill()
+  const notification = permission.notification
+  if (!notification) return
+  if (notification.exitCode !== null) return
+  closeNotification(permission.notificationId)
+  notification.kill()
+}
+
+// The notification is owned by the desktop notification server, not by the
+// notify-send process, so killing the process leaves the popup on screen.
+// Closing it requires the notification id, which notify-send reports on
+// stdout when started with --print-id.
+function closeNotification(notificationId: number | undefined): void {
+  if (notificationId === undefined) return
+  const runBusctl = promisify(execFile)
+  void runBusctl(
+    "busctl",
+    [
+      "--user",
+      "call",
+      "org.freedesktop.Notifications",
+      "/org/freedesktop/Notifications",
+      "org.freedesktop.Notifications",
+      "CloseNotification",
+      "u",
+      String(notificationId),
+    ],
+    { timeout: 2_000 },
+  ).catch(() => {})
 }
 
 function stopPendingPermission(
@@ -230,11 +257,15 @@ function showLinuxPermissionNotification(
     { stdio: ["ignore", "pipe", "ignore"] },
   )
   permission.notification = notification
-  let selectedAction = ""
+  let notificationOutput = ""
 
   notification.stdout?.setEncoding("utf8")
   notification.stdout?.on("data", (chunk: string) => {
-    selectedAction += chunk
+    notificationOutput += chunk
+    const { notificationId } = parseNotificationOutput(notificationOutput)
+    if (notificationId !== undefined) {
+      permission.notificationId = notificationId
+    }
   })
   notification.once("error", (failure: Error) => {
     if (!isCurrentPermission(pendingPermissions, permission)) return
@@ -247,7 +278,7 @@ function showLinuxPermissionNotification(
   })
   notification.once("close", (exitCode) => {
     if (!isCurrentPermission(pendingPermissions, permission)) return
-    const action = selectedAction.trim()
+    const { action } = parseNotificationOutput(notificationOutput)
     if (action === ALLOW_ACTION) {
       void replyPermission(api, pendingPermissions, permission, "user", "once")
       return

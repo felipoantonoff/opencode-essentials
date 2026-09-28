@@ -1,6 +1,9 @@
 # Changelog
 
 ```log
+0.8.0 - 2026/09/28
+fix: close the KDE notification when the prompt answers first
+
 0.7.0 - 2026/09/28
 chore: bump package version to 0.7.0
 docs: make the main readme a landing page
